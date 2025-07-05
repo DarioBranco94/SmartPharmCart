@@ -10,6 +10,10 @@ Per installare i pacchetti necessari eseguire:
 pip install -r requirements.txt
 ```
 
+Configurare i parametri di connessione creando un file `.env` nella
+cartella del progetto. Il file di esempio contiene le variabili per il
+database, i broker MQTT e il percorso del file SQLite.
+
 ## Esecuzione
 
 Avviare l'interfaccia grafica con:
@@ -76,6 +80,7 @@ Verrà generato il database con le tabelle necessarie.
    ```bash
    docker compose up
    ```
+   Il comando leggerà automaticamente le variabili definite nel file `.env`.
 
 4. Con il server web in esecuzione, avviare l'interfaccia Qt:
 

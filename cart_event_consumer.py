@@ -3,6 +3,9 @@ import os
 import time
 import paho.mqtt.client as mqtt
 import psycopg2
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DB_PARAMS = {
     'host': os.environ.get('DB_HOST', 'db'),

@@ -1,5 +1,7 @@
 import sys
 import sqlite3
+import os
+from dotenv import load_dotenv
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QComboBox, QListWidget, QTabWidget, QCheckBox, QSplitter, QGroupBox, QSizePolicy,
@@ -8,7 +10,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl, Qt
 
-DB_PATH = "carrello.db"
+load_dotenv()
+
+DB_PATH = os.getenv("DB_PATH", "carrello.db")
 
 
 class LoginDialog(QDialog):

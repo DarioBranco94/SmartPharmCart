@@ -1,8 +1,12 @@
 import sqlite3
 from pathlib import Path
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 # Percorso file DB
-db_path = Path("./carrello.db")
+db_path = Path(os.getenv("DB_PATH", "./carrello.db"))
 
 # Leggi lo schema SQL generato
 with open("./schema.sql", "r") as f:
