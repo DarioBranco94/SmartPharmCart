@@ -30,9 +30,9 @@ CREATE TABLE drawer (
 );
 
 CREATE TABLE compartment (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
     drawer_id INTEGER NOT NULL,
     number INTEGER NOT NULL,
+    PRIMARY KEY (drawer_id, number),
     FOREIGN KEY (drawer_id) REFERENCES drawer(id)
 );
 
@@ -42,31 +42,37 @@ CREATE TABLE drug_master (
 );
 
 CREATE TABLE batch (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
     drug_id INTEGER NOT NULL,
-    code TEXT,
+    code TEXT NOT NULL,
     expiry DATE,
+    PRIMARY KEY (drug_id, code),
     FOREIGN KEY (drug_id) REFERENCES drug_master(id)
 );
 
 CREATE TABLE inventory (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    batch_id INTEGER NOT NULL,
-    compartment_id INTEGER NOT NULL,
+    drug_id INTEGER NOT NULL,
+    batch_code TEXT NOT NULL,
+    drawer_id INTEGER NOT NULL,
+    compartment_number INTEGER NOT NULL,
     quantity INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(batch_id, compartment_id),
-    FOREIGN KEY (batch_id) REFERENCES batch(id),
-    FOREIGN KEY (compartment_id) REFERENCES compartment(id)
+    PRIMARY KEY (drug_id, batch_code, drawer_id, compartment_number),
+    FOREIGN KEY (drug_id, batch_code) REFERENCES batch(drug_id, code),
+    FOREIGN KEY (drawer_id, compartment_number) REFERENCES compartment(drawer_id, number)
 );
 
 CREATE TABLE movement (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    inventory_id INTEGER NOT NULL,
+    drug_id INTEGER NOT NULL,
+    batch_code TEXT NOT NULL,
+    drawer_id INTEGER NOT NULL,
+    compartment_number INTEGER NOT NULL,
     change INTEGER NOT NULL,
+    movement_type TEXT NOT NULL,
     reason TEXT,
     ts DATETIME DEFAULT CURRENT_TIMESTAMP,
     staff_id INTEGER,
-    FOREIGN KEY (inventory_id) REFERENCES inventory(id),
+    FOREIGN KEY (drug_id, batch_code, drawer_id, compartment_number)
+        REFERENCES inventory(drug_id, batch_code, drawer_id, compartment_number),
     FOREIGN KEY (staff_id) REFERENCES staff(id)
 );
 
