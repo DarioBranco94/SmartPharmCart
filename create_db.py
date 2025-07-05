@@ -15,4 +15,3 @@ cursor.executescript(schema_sql)
 conn.commit()
 conn.close()
 
-str(db_path)
