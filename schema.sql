@@ -111,3 +111,18 @@ INSERT INTO compartment (drawer_id, number) VALUES
     (3,1),(3,2),(3,3),(3,4),(3,5),(3,6),
     (4,1),(4,2),(4,3),(4,4),(4,5),(4,6),
     (5,1),(5,2),(5,3),(5,4),(5,5),(5,6);
+
+-- Aggiorna la tabella inventory ad ogni inserimento in movement
+CREATE TRIGGER movement_inventory_update
+AFTER INSERT ON movement
+BEGIN
+    UPDATE inventory
+    SET quantity = quantity + NEW.change
+    WHERE id = NEW.inventory_id;
+
+    -- Se la quantita' scende sotto zero annulla la transazione
+    SELECT CASE
+        WHEN (SELECT quantity FROM inventory WHERE id = NEW.inventory_id) < 0
+        THEN RAISE(ROLLBACK, 'Negative inventory quantity')
+    END;
+END;

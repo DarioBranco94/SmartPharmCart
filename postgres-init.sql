@@ -21,3 +21,21 @@ CREATE TABLE IF NOT EXISTS mqtt_outbox (
     sent BOOLEAN DEFAULT FALSE,
     ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Aggiorna la tabella inventory ad ogni inserimento in movement
+CREATE OR REPLACE FUNCTION update_inventory_after_movement()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE inventory SET quantity = quantity + NEW.change
+    WHERE id = NEW.inventory_id;
+    IF (SELECT quantity FROM inventory WHERE id = NEW.inventory_id) < 0 THEN
+        RAISE EXCEPTION 'Negative inventory quantity';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER movement_inventory_update
+AFTER INSERT ON movement
+FOR EACH ROW
+EXECUTE FUNCTION update_inventory_after_movement();
