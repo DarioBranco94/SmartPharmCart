@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS cart_location;
+DROP TABLE IF EXISTS drawer_state;
 DROP TABLE IF EXISTS mqtt_outbox;
 DROP TABLE IF EXISTS movement;
 DROP TABLE IF EXISTS inventory;
@@ -117,6 +118,13 @@ CREATE TABLE cart_location (
     y REAL,
     ts DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (cart_id) REFERENCES cart(id)
+);
+
+CREATE TABLE drawer_state (
+    drawer_id INTEGER PRIMARY KEY,
+    state TEXT NOT NULL,
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (drawer_id) REFERENCES drawer(id)
 );
 
 -- Default data
