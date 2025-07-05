@@ -65,12 +65,17 @@ CREATE TABLE movement (
     change INTEGER NOT NULL,
     reason TEXT,
     ts DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (inventory_id) REFERENCES inventory(id)
+    staff_id INTEGER,
+    FOREIGN KEY (inventory_id) REFERENCES inventory(id),
+    FOREIGN KEY (staff_id) REFERENCES staff(id)
 );
 
 CREATE TABLE staff (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL
+    name TEXT NOT NULL,
+    username TEXT UNIQUE,
+    password TEXT,
+    badge TEXT UNIQUE
 );
 
 CREATE TABLE mqtt_outbox (
@@ -94,6 +99,7 @@ CREATE TABLE cart_location (
 INSERT INTO cart (id, name) VALUES (1, 'Cart 1');
 INSERT INTO ward (id, name) VALUES (1, 'Default Ward');
 UPDATE cart SET ward_id = 1 WHERE id = 1;
+INSERT INTO staff (name, username, password, badge) VALUES ('Admin', 'admin', 'admin', '0001');
 
 -- Create drawers and compartments for cart 1
 INSERT INTO drawer (cart_id, number) VALUES
