@@ -1,5 +1,4 @@
 version: '3.8'
-
 services:
   web:
     build: .
@@ -21,5 +20,51 @@ services:
     ports:
       - "1883:1883"
 
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: cart
+      POSTGRES_USER: cart
+      POSTGRES_PASSWORD: cart
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+
+  cart_consumer:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+    depends_on:
+      - db
+      - mosquitto
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: cart
+      DB_USER: cart
+      DB_PASSWORD: cart
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+    command: python cart_event_consumer.py
+
+  cart_sync:
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+    depends_on:
+      - db
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: cart
+      DB_USER: cart
+      DB_PASSWORD: cart
+      CENTRAL_MQTT_HOST: central-broker
+      CENTRAL_MQTT_PORT: 1883
+    command: python cart_sync_service.py
+
 volumes:
   mosquitto_data:
+  postgres_data:
