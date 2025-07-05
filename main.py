@@ -77,7 +77,6 @@ class MainWindow(QMainWindow):
                 color: #000;
             }
         """)
-        self.tabs.setStyleSheet(""" /* identico */ """)
         self.tabs.addTab(self._create_caricamento_tab(), "1. Caricamento")
         self.tabs.addTab(self._create_somministrazione_tab(), "2. Somministrazione")
 
