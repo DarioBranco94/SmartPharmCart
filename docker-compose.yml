@@ -39,14 +39,8 @@ services:
     depends_on:
       - db
       - mosquitto
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: cart
-      DB_USER: cart
-      DB_PASSWORD: cart
-      MQTT_HOST: mosquitto
-      MQTT_PORT: 1883
+    env_file:
+      - .env
     command: python cart_event_consumer.py
 
   cart_sync:
@@ -55,14 +49,8 @@ services:
       dockerfile: services/Dockerfile
     depends_on:
       - db
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: cart
-      DB_USER: cart
-      DB_PASSWORD: cart
-      CENTRAL_MQTT_HOST: central-broker
-      CENTRAL_MQTT_PORT: 1883
+    env_file:
+      - .env
     command: python cart_sync_service.py
 
 volumes:
