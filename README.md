@@ -1,5 +1,32 @@
 # SmartPharmCart
 
+Applicazione di esempio che combina una GUI Python con PyQt6 e un front-end Three.js servito da Node.js.
+
+## Installazione delle dipendenze Python
+
+Per installare i pacchetti necessari eseguire:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Esecuzione
+
+Avviare l'interfaccia grafica con:
+
+```bash
+python main.py
+```
+
+Per il front-end 3D è necessario avere Node.js, quindi:
+
+```bash
+npm install
+npm start
+```
+
+
+=======
 SmartPharmCart è un prototipo di carrello farmaci con interfaccia grafica in Python e visualizzazione 3D in un'applicazione web servita da Node.js. Il progetto mostra un modello 3D del carrello e consente di gestire l'elenco dei pazienti e dei farmaci da somministrare tramite un database SQLite.
 
 ## Prerequisiti
@@ -57,4 +84,5 @@ Verrà generato il database con le tabelle necessarie.
    ```
 
 L'applicazione mostrerà la GUI con incorporata la pagina web del carrello 3D. Da qui si possono aggiungere pazienti, caricare i farmaci e gestire la somministrazione.
+
 
