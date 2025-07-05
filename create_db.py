@@ -5,7 +5,7 @@ from pathlib import Path
 db_path = Path("./carrello.db")
 
 # Leggi lo schema SQL generato
-with open("./carrello.sql", "r") as f:
+with open("./schema.sql", "r") as f:
     schema_sql = f.read()
 
 # Crea e inizializza il database

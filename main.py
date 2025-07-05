@@ -1,6 +1,5 @@
 import sys
 import sqlite3
-from datetime import datetime, date
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QComboBox, QListWidget, QTabWidget, QCheckBox, QSplitter, QGroupBox, QSizePolicy,
@@ -11,19 +10,6 @@ from PyQt6.QtCore import QUrl, Qt
 
 DB_PATH = "carrello.db"
 
-def get_or_create_giro():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM Giri WHERE completato = 0 ORDER BY id DESC LIMIT 1")
-    row = cur.fetchone()
-    if row:
-        conn.close()
-        return row[0]
-    cur.execute("INSERT INTO Giri (data, completato) VALUES (?, 0)", (date.today().isoformat(),))
-    conn.commit()
-    gid = cur.lastrowid
-    conn.close()
-    return gid
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -33,15 +19,13 @@ class MainWindow(QMainWindow):
 
         self.conn = sqlite3.connect(DB_PATH)
         self.cursor = self.conn.cursor()
-        self.cursor.execute("DELETE FROM GiroPazienti")
-        self.cursor.execute("DELETE FROM Prescrizioni")
-        self.cursor.execute("DELETE FROM Giri")
-        self.conn.commit()
-        self.giro_id = get_or_create_giro()
+
+        self.farmaci_per_paziente = {}
 
         self.allocazioni = {}
         self.farmaci_da_somministrare = []
         self.farmaco_corrente_index = 0
+
 
         self.view = QWebEngineView()
         self.view.load(QUrl("http://localhost:3000"))
@@ -128,6 +112,57 @@ class MainWindow(QMainWindow):
             }
         """)
 
+    def ensure_drug(self, name):
+        self.cursor.execute("INSERT OR IGNORE INTO drug_master(name) VALUES (?)", (name,))
+        self.cursor.execute("SELECT id FROM drug_master WHERE name = ?", (name,))
+        return self.cursor.fetchone()[0]
+
+    def ensure_batch(self, drug_id):
+        self.cursor.execute("SELECT id FROM batch WHERE drug_id = ? LIMIT 1", (drug_id,))
+        row = self.cursor.fetchone()
+        if row:
+            return row[0]
+        self.cursor.execute("INSERT INTO batch (drug_id, code) VALUES (?, 'DEF')", (drug_id,))
+        return self.cursor.lastrowid
+
+    def add_inventory(self, batch_id, compartment_id, qty):
+        self.cursor.execute(
+            "INSERT OR IGNORE INTO inventory (batch_id, compartment_id, quantity) VALUES (?, ?, 0)",
+            (batch_id, compartment_id),
+        )
+        self.cursor.execute(
+            "SELECT id, quantity FROM inventory WHERE batch_id=? AND compartment_id=?",
+            (batch_id, compartment_id),
+        )
+        inv_id, _ = self.cursor.fetchone()
+        self.cursor.execute(
+            "UPDATE inventory SET quantity = quantity + ? WHERE id=?", (qty, inv_id)
+        )
+        self.cursor.execute(
+            "INSERT INTO movement (inventory_id, change, reason) VALUES (?, ?, 'load')",
+            (inv_id, qty),
+        )
+        return inv_id
+
+    def remove_inventory(self, batch_id, compartment_id, qty):
+        self.cursor.execute(
+            "SELECT id, quantity FROM inventory WHERE batch_id=? AND compartment_id=?",
+            (batch_id, compartment_id),
+        )
+        row = self.cursor.fetchone()
+        if not row:
+            return
+        inv_id, quantity = row
+        if quantity <= 0:
+            return
+        self.cursor.execute(
+            "UPDATE inventory SET quantity = quantity - ? WHERE id=?", (qty, inv_id)
+        )
+        self.cursor.execute(
+            "INSERT INTO movement (inventory_id, change, reason) VALUES (?, ?, 'dispense')",
+            (inv_id, -qty),
+        )
+
     def _create_caricamento_tab(self):
         layout = QHBoxLayout()
         sx_group = QGroupBox("Seleziona Pazienti del Giro")
@@ -212,14 +247,10 @@ class MainWindow(QMainWindow):
 
     def aggiungi_paziente(self):
         nome = self.dropdown_pazienti.currentText()
-        self.cursor.execute("INSERT OR IGNORE INTO Pazienti(nome) VALUES (?)", (nome,))
-        self.conn.commit()
-        self.cursor.execute("SELECT id FROM Pazienti WHERE nome = ?", (nome,))
-        pid = self.cursor.fetchone()[0]
-        self.cursor.execute("INSERT OR IGNORE INTO GiroPazienti (giro_id, paziente_id) VALUES (?, ?)", (self.giro_id, pid))
-        self.conn.commit()
-        self.lista_pazienti.addItem(nome)
-        self.combo_pazienti.addItem(nome)
+        if nome not in self.farmaci_per_paziente:
+            self.farmaci_per_paziente[nome] = []
+            self.lista_pazienti.addItem(nome)
+            self.combo_pazienti.addItem(nome)
 
 
     def visualizza_farmaco_da_lista(self, item):
@@ -259,33 +290,34 @@ class MainWindow(QMainWindow):
 
         for i in range(self.lista_pazienti.count()):
             nome = self.lista_pazienti.item(i).text()
-            self.cursor.execute("SELECT id FROM Pazienti WHERE nome = ?", (nome,))
-            pid = self.cursor.fetchone()[0]
             farmaci = sample(farmaci_possibili, 3)
+            self.farmaci_per_paziente[nome] = farmaci
 
             for f in farmaci:
-                self.cursor.execute("INSERT OR IGNORE INTO Farmaci(nome) VALUES (?)", (f,))
-                self.cursor.execute("SELECT id FROM Farmaci WHERE nome = ?", (f,))
-                fid = self.cursor.fetchone()[0]
+                drug_id = self.ensure_drug(f)
+                batch_id = self.ensure_batch(drug_id)
 
                 cassetto = ((scomparto_id - 1) // 6) + 1
                 scomparto = scomparto_id
+                comp_id = scomparto_id
                 scomparto_id += 1
 
-                self.cursor.execute("""
-                    INSERT OR IGNORE INTO Prescrizioni
-                    (giro_id, paziente_id, farmaco_id, caricato, somministrato, cassetto, scomparto)
-                    VALUES (?, ?, ?, 0, 0, ?, ?)
-                """, (self.giro_id, pid, fid, cassetto, scomparto))
+                inv_id = self.add_inventory(batch_id, comp_id, 1)
 
-                self.allocazioni[f] = {"cassetto": cassetto, "scomparto": scomparto}
+                self.allocazioni[f] = {
+                    "cassetto": cassetto,
+                    "scomparto": scomparto,
+                    "batch_id": batch_id,
+                    "compartment_id": comp_id,
+                    "inventory_id": inv_id,
+                }
                 farmaci_giro.append(f)
 
         self.conn.commit()
         self.box_medicinali.addItems(farmaci_giro)
         if self.box_medicinali.count() > 0:
             self.box_medicinali.setCurrentRow(0)
-            self.visualizza_farmaco_corrente()  # ✅ abilita checkbox e disegna
+            self.visualizza_farmaco_corrente()
 
     def visualizza_farmaco_corrente(self):
         farmaco = self.box_medicinali.currentItem().text()
@@ -303,29 +335,11 @@ class MainWindow(QMainWindow):
         if self.checkbox_caricato.isChecked():
             farmaco = self.box_medicinali.currentItem().text()
             self.btn_prossimo_farmaco.setEnabled(True)
-
-            # Ottieni ID farmaco
-            self.cursor.execute("SELECT id FROM Farmaci WHERE nome = ?", (farmaco,))
-            farmaco_id = self.cursor.fetchone()[0]
-
-            for i in range(self.lista_pazienti.count()):
-                nome = self.lista_pazienti.item(i).text()
-                self.cursor.execute("SELECT id FROM Pazienti WHERE nome = ?", (nome,))
-                paziente_id = self.cursor.fetchone()[0]
-
-                self.cursor.execute("""
-                    UPDATE Prescrizioni 
-                    SET caricato = 1, caricato_timestamp = CURRENT_TIMESTAMP
-                    WHERE giro_id = ? AND paziente_id = ? AND farmaco_id = ?
-                """, (self.giro_id, paziente_id, farmaco_id))
-
-            self.conn.commit()
-
-            # 🔒 Chiudi cassetto nel modello 3D
             info = self.allocazioni.get(farmaco)
             if info:
                 script = f'window.chiudiCassetto("Cassetto{info["cassetto"]}");'
                 self.view.page().runJavaScript(script)
+            self.conn.commit()
 
     def prossimo_farmaco(self):
         row = self.box_medicinali.currentRow()
@@ -338,14 +352,7 @@ class MainWindow(QMainWindow):
 
     def avvia_somministrazione(self):
         paziente = self.combo_pazienti.currentText()
-        self.cursor.execute("SELECT id FROM Pazienti WHERE nome = ?", (paziente,))
-        self.pid_corrente = self.cursor.fetchone()[0]
-        self.cursor.execute("""
-            SELECT f.nome FROM Prescrizioni p
-            JOIN Farmaci f ON f.id = p.farmaco_id
-            WHERE p.giro_id = ? AND p.paziente_id = ?
-        """, (self.giro_id, self.pid_corrente))
-        self.farmaci_da_somministrare = [r[0] for r in self.cursor.fetchall()]
+        self.farmaci_da_somministrare = self.farmaci_per_paziente.get(paziente, [])
         self.farmaco_corrente_index = 0
         self.mostra_farmaco_corrente()
         self.aggiorna_lista_farmaci_stato(paziente)
@@ -378,14 +385,9 @@ class MainWindow(QMainWindow):
             return
 
         farmaco = self.farmaci_da_somministrare[self.farmaco_corrente_index]
-        self.cursor.execute("SELECT id FROM Farmaci WHERE nome = ?", (farmaco,))
-        farmaco_id = self.cursor.fetchone()[0]
-
-        self.cursor.execute("""
-            UPDATE Prescrizioni 
-            SET somministrato = 1, timestamp = CURRENT_TIMESTAMP
-            WHERE giro_id = ? AND paziente_id = ? AND farmaco_id = ?
-        """, (self.giro_id, self.pid_corrente, farmaco_id))
+        info = self.allocazioni.get(farmaco)
+        if info:
+            self.remove_inventory(info["batch_id"], info["compartment_id"], 1)
         self.conn.commit()
 
         # 🔒 Chiudi cassetto attuale
