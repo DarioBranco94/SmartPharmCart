@@ -10,3 +10,16 @@ services:
       - ./public:/app/public
     command: >
       sh -c "npm run build && npm start"
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto/conf.d:/mosquitto/config/conf.d
+      - ./mosquitto/pwfile:/mosquitto/config/pwfile
+      - mosquitto_data:/mosquitto/data
+    ports:
+      - "1883:1883"
+
+volumes:
+  mosquitto_data:
