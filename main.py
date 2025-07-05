@@ -35,22 +35,24 @@ class LoginDialog(QDialog):
         layout.addWidget(self.login_btn)
         self.setLayout(layout)
         self.staff_id = None
+        self.staff_name = None
 
     def handle_login(self):
         u = self.user_edit.text()
         p = self.pass_edit.text()
         self.cursor.execute(
-            "SELECT id FROM staff WHERE username=? AND password=?", (u, p)
+            "SELECT id, name FROM staff WHERE username=? AND password=?",
+            (u, p),
         )
         row = self.cursor.fetchone()
         if row:
-            self.staff_id = row[0]
+            self.staff_id, self.staff_name = row
             self.accept()
         else:
             QMessageBox.warning(self, "Errore", "Credenziali non valide")
 
 class MainWindow(QMainWindow):
-    def __init__(self, conn, staff_id):
+    def __init__(self, conn, staff_id, staff_name):
         super().__init__()
         self.setWindowTitle("Carrello Farmaci - GUI Qt + SQLite")
         self.resize(1600, 900)
@@ -58,6 +60,7 @@ class MainWindow(QMainWindow):
         self.conn = conn
         self.cursor = self.conn.cursor()
         self.staff_id = staff_id
+        self.staff_name = staff_name
 
         self.farmaci_per_paziente = {}
 
@@ -108,6 +111,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.web_frame)
         splitter.setSizes([1000, 600])
         self.setCentralWidget(splitter)
+        self.statusBar().showMessage(f"Operatore: {self.staff_name} (ID {self.staff_id})")
 
         self.setStyleSheet("""
             QMainWindow {
@@ -156,50 +160,52 @@ class MainWindow(QMainWindow):
         self.cursor.execute("SELECT id FROM drug_master WHERE name = ?", (name,))
         return self.cursor.fetchone()[0]
 
-    def ensure_batch(self, drug_id):
-        self.cursor.execute("SELECT id FROM batch WHERE drug_id = ? LIMIT 1", (drug_id,))
-        row = self.cursor.fetchone()
-        if row:
-            return row[0]
-        self.cursor.execute("INSERT INTO batch (drug_id, code) VALUES (?, 'DEF')", (drug_id,))
-        return self.cursor.lastrowid
+    def ensure_batch(self, drug_id, code="DEF"):
+        self.cursor.execute(
+            "INSERT OR IGNORE INTO batch (drug_id, code) VALUES (?, ?)",
+            (drug_id, code),
+        )
+        return code
 
-    def add_inventory(self, batch_id, compartment_id, qty):
+    def add_inventory(self, drug_id, batch_code, drawer_id, number, qty):
         self.cursor.execute(
-            "INSERT OR IGNORE INTO inventory (batch_id, compartment_id, quantity) VALUES (?, ?, 0)",
-            (batch_id, compartment_id),
+            """
+            INSERT OR IGNORE INTO inventory (drug_id, batch_code, drawer_id, compartment_number, quantity)
+            VALUES (?, ?, ?, ?, 0)
+            """,
+            (drug_id, batch_code, drawer_id, number),
         )
         self.cursor.execute(
-            "SELECT id, quantity FROM inventory WHERE batch_id=? AND compartment_id=?",
-            (batch_id, compartment_id),
-        )
-        inv_id, _ = self.cursor.fetchone()
-        self.cursor.execute(
-            "UPDATE inventory SET quantity = quantity + ? WHERE id=?", (qty, inv_id)
-        )
-        self.cursor.execute(
-            "INSERT INTO movement (inventory_id, change, reason, staff_id) VALUES (?, ?, 'load', ?)",
-            (inv_id, qty, self.staff_id),
-        )
-        return inv_id
-
-    def remove_inventory(self, batch_id, compartment_id, qty):
-        self.cursor.execute(
-            "SELECT id, quantity FROM inventory WHERE batch_id=? AND compartment_id=?",
-            (batch_id, compartment_id),
+            "SELECT quantity FROM inventory WHERE drug_id=? AND batch_code=? AND drawer_id=? AND compartment_number=?",
+            (drug_id, batch_code, drawer_id, number),
         )
         row = self.cursor.fetchone()
-        if not row:
-            return
-        inv_id, quantity = row
-        if quantity <= 0:
-            return
+        current = row[0] if row else 0
         self.cursor.execute(
-            "UPDATE inventory SET quantity = quantity - ? WHERE id=?", (qty, inv_id)
+            "UPDATE inventory SET quantity = ? WHERE drug_id=? AND batch_code=? AND drawer_id=? AND compartment_number=?",
+            (current + qty, drug_id, batch_code, drawer_id, number),
         )
         self.cursor.execute(
-            "INSERT INTO movement (inventory_id, change, reason, staff_id) VALUES (?, ?, 'dispense', ?)",
-            (inv_id, -qty, self.staff_id),
+            "INSERT INTO movement (drug_id, batch_code, drawer_id, compartment_number, change, movement_type, staff_id) VALUES (?, ?, ?, ?, ?, 'load', ?)",
+            (drug_id, batch_code, drawer_id, number, qty, self.staff_id),
+        )
+
+    def remove_inventory(self, drug_id, batch_code, drawer_id, number, qty):
+        self.cursor.execute(
+            "SELECT quantity FROM inventory WHERE drug_id=? AND batch_code=? AND drawer_id=? AND compartment_number=?",
+            (drug_id, batch_code, drawer_id, number),
+        )
+        row = self.cursor.fetchone()
+        if not row or row[0] <= 0:
+            return
+        new_q = max(0, row[0] - qty)
+        self.cursor.execute(
+            "UPDATE inventory SET quantity = ? WHERE drug_id=? AND batch_code=? AND drawer_id=? AND compartment_number=?",
+            (new_q, drug_id, batch_code, drawer_id, number),
+        )
+        self.cursor.execute(
+            "INSERT INTO movement (drug_id, batch_code, drawer_id, compartment_number, change, movement_type, staff_id) VALUES (?, ?, ?, ?, ?, 'dispense', ?)",
+            (drug_id, batch_code, drawer_id, number, -qty, self.staff_id),
         )
 
     def _create_caricamento_tab(self):
@@ -334,21 +340,23 @@ class MainWindow(QMainWindow):
 
             for f in farmaci:
                 drug_id = self.ensure_drug(f)
-                batch_id = self.ensure_batch(drug_id)
+                batch_code = self.ensure_batch(drug_id)
 
-                cassetto = ((scomparto_id - 1) // 6) + 1
-                scomparto = scomparto_id
-                comp_id = scomparto_id
+                drawer_id = ((scomparto_id - 1) // 6) + 1
+                number = ((scomparto_id - 1) % 6) + 1
+                cassetto = drawer_id
+                scomparto = number
                 scomparto_id += 1
 
-                inv_id = self.add_inventory(batch_id, comp_id, 1)
+                self.add_inventory(drug_id, batch_code, drawer_id, number, 1)
 
                 self.allocazioni[f] = {
                     "cassetto": cassetto,
                     "scomparto": scomparto,
-                    "batch_id": batch_id,
-                    "compartment_id": comp_id,
-                    "inventory_id": inv_id,
+                    "drug_id": drug_id,
+                    "batch_code": batch_code,
+                    "drawer_id": drawer_id,
+                    "number": number,
                 }
                 farmaci_giro.append(f)
 
@@ -426,7 +434,13 @@ class MainWindow(QMainWindow):
         farmaco = self.farmaci_da_somministrare[self.farmaco_corrente_index]
         info = self.allocazioni.get(farmaco)
         if info:
-            self.remove_inventory(info["batch_id"], info["compartment_id"], 1)
+            self.remove_inventory(
+                info["drug_id"],
+                info["batch_code"],
+                info["drawer_id"],
+                info["number"],
+                1,
+            )
         self.conn.commit()
 
         # 🔒 Chiudi cassetto attuale
@@ -453,6 +467,6 @@ if __name__ == "__main__":
     login = LoginDialog(cursor)
     if login.exec() != QDialog.DialogCode.Accepted:
         sys.exit(0)
-    window = MainWindow(conn, login.staff_id)
+    window = MainWindow(conn, login.staff_id, login.staff_name)
     window.show()
     sys.exit(app.exec())

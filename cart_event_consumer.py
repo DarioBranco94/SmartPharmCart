@@ -31,7 +31,10 @@ conn.autocommit = True
 
 def validate_payload(topic, data):
     if topic == 'movement':
-        required = {'inventory_id', 'change', 'reason', 'staff_id'}
+        required = {
+            'drug_id', 'batch_code', 'drawer_id', 'compartment_number',
+            'change', 'movement_type', 'staff_id'
+        }
         return required.issubset(data)
     if topic == 'drawer/state':
         required = {'drawer_id', 'state'}
@@ -59,8 +62,16 @@ def on_message(client, userdata, msg):
     cur = conn.cursor()
     if msg.topic == 'movement':
         cur.execute(
-            'INSERT INTO movement (inventory_id, change, reason, staff_id) VALUES (%s,%s,%s,%s)',
-            (data['inventory_id'], data['change'], data['reason'], data['staff_id'])
+            'INSERT INTO movement (drug_id, batch_code, drawer_id, compartment_number, change, movement_type, staff_id) VALUES (%s,%s,%s,%s,%s,%s,%s)',
+            (
+                data['drug_id'],
+                data['batch_code'],
+                data['drawer_id'],
+                data['compartment_number'],
+                data['change'],
+                data['movement_type'],
+                data['staff_id'],
+            ),
         )
     elif msg.topic == 'drawer/state':
         cur.execute(
