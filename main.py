@@ -3,7 +3,7 @@ import sqlite3
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QComboBox, QListWidget, QTabWidget, QCheckBox, QSplitter, QGroupBox, QSizePolicy,
-    QFrame, QListWidgetItem
+    QFrame, QListWidgetItem, QDialog, QLineEdit, QMessageBox
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl, Qt
@@ -11,14 +11,49 @@ from PyQt6.QtCore import QUrl, Qt
 DB_PATH = "carrello.db"
 
 
+class LoginDialog(QDialog):
+    def __init__(self, cursor):
+        super().__init__()
+        self.cursor = cursor
+        self.setWindowTitle("Login")
+        layout = QVBoxLayout()
+        self.user_edit = QLineEdit()
+        self.user_edit.setPlaceholderText("Username")
+        self.pass_edit = QLineEdit()
+        self.pass_edit.setPlaceholderText("Password")
+        self.pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.login_btn = QPushButton("Login")
+        self.login_btn.clicked.connect(self.handle_login)
+        layout.addWidget(QLabel("Username:"))
+        layout.addWidget(self.user_edit)
+        layout.addWidget(QLabel("Password:"))
+        layout.addWidget(self.pass_edit)
+        layout.addWidget(self.login_btn)
+        self.setLayout(layout)
+        self.staff_id = None
+
+    def handle_login(self):
+        u = self.user_edit.text()
+        p = self.pass_edit.text()
+        self.cursor.execute(
+            "SELECT id FROM staff WHERE username=? AND password=?", (u, p)
+        )
+        row = self.cursor.fetchone()
+        if row:
+            self.staff_id = row[0]
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Errore", "Credenziali non valide")
+
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, conn, staff_id):
         super().__init__()
         self.setWindowTitle("Carrello Farmaci - GUI Qt + SQLite")
         self.resize(1600, 900)
 
-        self.conn = sqlite3.connect(DB_PATH)
+        self.conn = conn
         self.cursor = self.conn.cursor()
+        self.staff_id = staff_id
 
         self.farmaci_per_paziente = {}
 
@@ -139,8 +174,8 @@ class MainWindow(QMainWindow):
             "UPDATE inventory SET quantity = quantity + ? WHERE id=?", (qty, inv_id)
         )
         self.cursor.execute(
-            "INSERT INTO movement (inventory_id, change, reason) VALUES (?, ?, 'load')",
-            (inv_id, qty),
+            "INSERT INTO movement (inventory_id, change, reason, staff_id) VALUES (?, ?, 'load', ?)",
+            (inv_id, qty, self.staff_id),
         )
         return inv_id
 
@@ -159,8 +194,8 @@ class MainWindow(QMainWindow):
             "UPDATE inventory SET quantity = quantity - ? WHERE id=?", (qty, inv_id)
         )
         self.cursor.execute(
-            "INSERT INTO movement (inventory_id, change, reason) VALUES (?, ?, 'dispense')",
-            (inv_id, -qty),
+            "INSERT INTO movement (inventory_id, change, reason, staff_id) VALUES (?, ?, 'dispense', ?)",
+            (inv_id, -qty, self.staff_id),
         )
 
     def _create_caricamento_tab(self):
@@ -409,6 +444,11 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MainWindow()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    login = LoginDialog(cursor)
+    if login.exec() != QDialog.DialogCode.Accepted:
+        sys.exit(0)
+    window = MainWindow(conn, login.staff_id)
     window.show()
     sys.exit(app.exec())
