@@ -2,18 +2,12 @@ import json
 import os
 import time
 import paho.mqtt.client as mqtt
-import psycopg2
+import sqlite3
 from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_PARAMS = {
-    'host': os.environ.get('DB_HOST', 'db'),
-    'port': os.environ.get('DB_PORT', 5432),
-    'dbname': os.environ.get('DB_NAME', 'cart'),
-    'user': os.environ.get('DB_USER', 'cart'),
-    'password': os.environ.get('DB_PASSWORD', 'cart'),
-}
+DB_PATH = os.environ.get('DB_PATH', 'carrello.db')
 
 MQTT_HOST = os.environ.get('MQTT_HOST', 'mosquitto')
 MQTT_PORT = int(os.environ.get('MQTT_PORT', '1883'))
@@ -24,10 +18,9 @@ TOPICS = [
 ]
 
 def get_conn():
-    return psycopg2.connect(**DB_PARAMS)
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 conn = get_conn()
-conn.autocommit = True
 
 def validate_payload(topic, data):
     if topic == 'movement':
@@ -62,7 +55,7 @@ def on_message(client, userdata, msg):
     cur = conn.cursor()
     if msg.topic == 'movement':
         cur.execute(
-            'INSERT INTO movement (drug_id, batch_code, drawer_id, compartment_number, change, movement_type, staff_id) VALUES (%s,%s,%s,%s,%s,%s,%s)',
+            'INSERT INTO movement (drug_id, batch_code, drawer_id, compartment_number, change, movement_type, staff_id) VALUES (?,?,?,?,?,?,?)',
             (
                 data['drug_id'],
                 data['batch_code'],
@@ -75,30 +68,33 @@ def on_message(client, userdata, msg):
         )
     elif msg.topic == 'drawer/state':
         cur.execute(
-            'INSERT INTO drawer_state (drawer_id, state, ts) VALUES (%s,%s, NOW()) '
-            'ON CONFLICT (drawer_id) DO UPDATE SET state = EXCLUDED.state, ts = NOW()',
+            'INSERT INTO drawer_state (drawer_id, state, ts) VALUES (?, ?, CURRENT_TIMESTAMP) '
+            'ON CONFLICT(drawer_id) DO UPDATE SET state=excluded.state, ts=CURRENT_TIMESTAMP',
             (data['drawer_id'], data['state'])
         )
     cur.execute(
-        'INSERT INTO mqtt_outbox (topic, payload) VALUES (%s,%s)',
+        'INSERT INTO mqtt_outbox (topic, payload) VALUES (?, ?)',
         (msg.topic, json.dumps(data))
     )
+    conn.commit()
     cur.close()
 
-def wait_for_postgres(db_params, retries=10, delay=2):
+def wait_for_sqlite(path, retries=10, delay=2):
     for i in range(retries):
-        try:
-            conn = psycopg2.connect(**db_params)
-            conn.close()
-            print("✅ DB pronto, connessione riuscita.")
-            return
-        except psycopg2.OperationalError as e:
-            print(f"⏳ Tentativo {i+1}/{retries}: DB non pronto ({e})")
-            time.sleep(delay)
+        if os.path.exists(path):
+            try:
+                sqlite3.connect(path).close()
+                print("✅ DB pronto, connessione riuscita.")
+                return
+            except sqlite3.Error as e:
+                print(f"⏳ Tentativo {i+1}/{retries}: DB non pronto ({e})")
+        else:
+            print(f"⏳ Tentativo {i+1}/{retries}: DB non trovato")
+        time.sleep(delay)
     raise Exception("❌ Errore: impossibile connettersi al DB dopo vari tentativi.")
 
 def main():
-    wait_for_postgres(DB_PARAMS)
+    wait_for_sqlite(DB_PATH)
 
     client = mqtt.Client()
     client.on_connect = on_connect
