@@ -85,8 +85,21 @@ def on_message(client, userdata, msg):
     )
     cur.close()
 
+def wait_for_postgres(db_params, retries=10, delay=2):
+    for i in range(retries):
+        try:
+            conn = psycopg2.connect(**db_params)
+            conn.close()
+            print("✅ DB pronto, connessione riuscita.")
+            return
+        except psycopg2.OperationalError as e:
+            print(f"⏳ Tentativo {i+1}/{retries}: DB non pronto ({e})")
+            time.sleep(delay)
+    raise Exception("❌ Errore: impossibile connettersi al DB dopo vari tentativi.")
 
 def main():
+    wait_for_postgres(DB_PARAMS)
+
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_message = on_message

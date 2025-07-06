@@ -20,8 +20,22 @@ CENTRAL_PORT = int(os.environ.get('CENTRAL_MQTT_PORT', '1883'))
 
 INTERVAL = int(os.environ.get('SYNC_INTERVAL', '15'))
 
+def wait_for_postgres(db_params, retries=10, delay=2):
+    for i in range(retries):
+        try:
+            conn = psycopg2.connect(**db_params)
+            conn.close()
+            print("✅ DB pronto, connessione riuscita.")
+            return
+        except psycopg2.OperationalError as e:
+            print(f"⏳ Tentativo {i+1}/{retries}: DB non pronto ({e})")
+            time.sleep(delay)
+    raise Exception("❌ Errore: impossibile connettersi al DB dopo vari tentativi.")
+
 
 def main():
+    wait_for_postgres(DB_PARAMS)
+
     conn = psycopg2.connect(**DB_PARAMS)
     conn.autocommit = True
     client = mqtt.Client()

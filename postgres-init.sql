@@ -76,11 +76,7 @@ CREATE TABLE drawer_state (
     drawer_id INTEGER PRIMARY KEY,
     state TEXT NOT NULL,
     ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-=======
-CREATE TABLE IF NOT EXISTS ward (
-    id SERIAL PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE
-);
+
 
 CREATE TABLE IF NOT EXISTS cart (
     id SERIAL PRIMARY KEY,
@@ -193,5 +189,5 @@ INSERT INTO compartment (drawer_id, number) VALUES
     (3,1),(3,2),(3,3),(3,4),(3,5),(3,6),
     (4,1),(4,2),(4,3),(4,4),(4,5),(4,6),
     (5,1),(5,2),(5,3),(5,4),(5,5),(5,6);
-=======
+
 
