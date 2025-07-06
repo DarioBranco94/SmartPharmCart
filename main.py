@@ -40,19 +40,26 @@ class LoginDialog(QDialog):
     def handle_login(self):
         u = self.user_edit.text()
         p = self.pass_edit.text()
-        # The new schema stores operators with columns operator_id and full_name
-        # and might not include a password field. Authentication is therefore
-        # performed using only the username if the password column is absent.
-        try:
-            self.cursor.execute(
-                "SELECT operator_id, full_name FROM staff WHERE username=? AND password=?",
-                (u, p),
-            )
-        except sqlite3.OperationalError:
-            self.cursor.execute(
-                "SELECT operator_id, full_name FROM staff WHERE username=?",
-                (u,),
-            )
+
+        # Determine available columns in staff table
+        self.cursor.execute("PRAGMA table_info(staff)")
+        cols = {r[1] for r in self.cursor.fetchall()}
+
+        if "operator_id" in cols and "full_name" in cols:
+            id_col = "operator_id"
+            name_col = "full_name"
+        else:
+            id_col = "id"
+            name_col = "name"
+
+        if "password" in cols:
+            query = f"SELECT {id_col}, {name_col} FROM staff WHERE username=? AND password=?"
+            params = (u, p)
+        else:
+            query = f"SELECT {id_col}, {name_col} FROM staff WHERE username=?"
+            params = (u,)
+
+        self.cursor.execute(query, params)
         row = self.cursor.fetchone()
         if row:
             self.staff_id, self.staff_name = row
@@ -76,6 +83,8 @@ class MainWindow(QMainWindow):
         self.allocazioni = {}
         self.farmaci_da_somministrare = []
         self.farmaco_corrente_index = 0
+
+        self.new_schema = self._detect_schema()
 
 
         self.view = QWebEngineView()
@@ -164,83 +173,149 @@ class MainWindow(QMainWindow):
             }
         """)
 
+    def _detect_schema(self):
+        """Return True if the DB uses the new columns (drug_code, qty_on_hand)."""
+        self.cursor.execute("PRAGMA table_info(inventory)")
+        cols = {r[1] for r in self.cursor.fetchall()}
+        return "qty_on_hand" in cols
+
     def ensure_drug(self, name):
-        """Ensure a drug exists in drug_master and return its drug_code."""
-        # With the new schema the primary key is `drug_code`. For simplicity we
-        # use the name itself as the code when inserting demo data.
-        self.cursor.execute(
-            "INSERT OR IGNORE INTO drug_master (drug_code, name) VALUES (?, ?)",
-            (name, name),
-        )
-        self.cursor.execute(
-            "SELECT drug_code FROM drug_master WHERE drug_code = ?",
-            (name,),
-        )
+        """Ensure a drug exists and return its identifier (id or code)."""
+        if self.new_schema:
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO drug_master (drug_code, name) VALUES (?, ?)",
+                (name, name),
+            )
+            self.cursor.execute(
+                "SELECT drug_code FROM drug_master WHERE drug_code = ?",
+                (name,),
+            )
+        else:
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO drug_master (name) VALUES (?)",
+                (name,),
+            )
+            self.cursor.execute(
+                "SELECT id FROM drug_master WHERE name = ?",
+                (name,),
+            )
         row = self.cursor.fetchone()
         return row[0] if row else name
 
-    def ensure_batch(self, drug_code, batch_number="DEF"):
-        """Return the batch_id for a drug and batch_number, creating it if missing."""
-        self.cursor.execute(
-            "INSERT OR IGNORE INTO batch (drug_code, batch_number) VALUES (?, ?)",
-            (drug_code, batch_number),
-        )
-        self.cursor.execute(
-            "SELECT batch_id FROM batch WHERE drug_code=? AND batch_number=?",
-            (drug_code, batch_number),
-        )
-        row = self.cursor.fetchone()
-        return row[0] if row else None
+    def ensure_batch(self, drug, batch_number="DEF"):
+        """Return the batch identifier for a drug, creating it if missing."""
+        if self.new_schema:
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO batch (drug_code, batch_number) VALUES (?, ?)",
+                (drug, batch_number),
+            )
+            self.cursor.execute(
+                "SELECT batch_id FROM batch WHERE drug_code=? AND batch_number=?",
+                (drug, batch_number),
+            )
+            row = self.cursor.fetchone()
+            return row[0] if row else None
+        else:
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO batch (drug_id, code) VALUES (?, ?)",
+                (drug, batch_number),
+            )
+            return batch_number
 
     def ensure_compartment(self, drawer_id, number):
-        """Return a compartment_id for the given drawer/number, inserting if needed."""
-        comp_id = drawer_id * 100 + number
-        label = f"D{drawer_id}-C{number}"
-        self.cursor.execute(
-            "INSERT OR IGNORE INTO compartment (compartment_id, drawer_id, label) VALUES (?, ?, ?)",
-            (comp_id, drawer_id, label),
-        )
-        return comp_id
+        """Return a compartment reference, inserting if needed."""
+        if self.new_schema:
+            comp_id = drawer_id * 100 + number
+            label = f"D{drawer_id}-C{number}"
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO compartment (compartment_id, drawer_id, label) VALUES (?, ?, ?)",
+                (comp_id, drawer_id, label),
+            )
+            return comp_id
+        else:
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO compartment (drawer_id, number) VALUES (?, ?)",
+                (drawer_id, number),
+            )
+            return number
 
-    def add_inventory(self, drug_code, batch_id, drawer_id, number, qty):
-        comp_id = self.ensure_compartment(drawer_id, number)
-        self.cursor.execute(
-            "INSERT OR IGNORE INTO inventory (compartment_id, drug_code, batch_id, qty_on_hand) VALUES (?, ?, ?, 0)",
-            (comp_id, drug_code, batch_id),
-        )
-        self.cursor.execute(
-            "SELECT qty_on_hand FROM inventory WHERE compartment_id=? AND drug_code=? AND batch_id=?",
-            (comp_id, drug_code, batch_id),
-        )
-        row = self.cursor.fetchone()
-        current = row[0] if row else 0
-        self.cursor.execute(
-            "UPDATE inventory SET qty_on_hand=? WHERE compartment_id=? AND drug_code=? AND batch_id=?",
-            (current + qty, comp_id, drug_code, batch_id),
-        )
-        self.cursor.execute(
-            "INSERT INTO movement (movement_type, compartment_id, drug_code, batch_id, qty, operator_id, timestamp) VALUES ('carico', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
-            (comp_id, drug_code, batch_id, qty, self.staff_id),
-        )
+    def add_inventory(self, drug, batch, drawer_id, number, qty):
+        if self.new_schema:
+            comp_id = self.ensure_compartment(drawer_id, number)
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO inventory (compartment_id, drug_code, batch_id, qty_on_hand) VALUES (?, ?, ?, 0)",
+                (comp_id, drug, batch),
+            )
+            self.cursor.execute(
+                "SELECT qty_on_hand FROM inventory WHERE compartment_id=? AND drug_code=? AND batch_id=?",
+                (comp_id, drug, batch),
+            )
+            row = self.cursor.fetchone()
+            current = row[0] if row else 0
+            self.cursor.execute(
+                "UPDATE inventory SET qty_on_hand=? WHERE compartment_id=? AND drug_code=? AND batch_id=?",
+                (current + qty, comp_id, drug, batch),
+            )
+            self.cursor.execute(
+                "INSERT INTO movement (movement_type, compartment_id, drug_code, batch_id, qty, operator_id, timestamp) VALUES ('carico', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                (comp_id, drug, batch, qty, self.staff_id),
+            )
+        else:
+            self.cursor.execute(
+                "INSERT OR IGNORE INTO inventory (drug_id, batch_code, drawer_id, compartment_number, quantity) VALUES (?, ?, ?, ?, 0)",
+                (drug, batch, drawer_id, number),
+            )
+            self.cursor.execute(
+                "SELECT quantity FROM inventory WHERE drug_id=? AND batch_code=? AND drawer_id=? AND compartment_number=?",
+                (drug, batch, drawer_id, number),
+            )
+            row = self.cursor.fetchone()
+            current = row[0] if row else 0
+            self.cursor.execute(
+                "UPDATE inventory SET quantity=? WHERE drug_id=? AND batch_code=? AND drawer_id=? AND compartment_number=?",
+                (current + qty, drug, batch, drawer_id, number),
+            )
+            self.cursor.execute(
+                "INSERT INTO movement (drug_id, batch_code, drawer_id, compartment_number, change, movement_type, staff_id) VALUES (?, ?, ?, ?, ?, 'load', ?)",
+                (drug, batch, drawer_id, number, qty, self.staff_id),
+            )
 
-    def remove_inventory(self, drug_code, batch_id, drawer_id, number, qty):
-        comp_id = self.ensure_compartment(drawer_id, number)
-        self.cursor.execute(
-            "SELECT qty_on_hand FROM inventory WHERE compartment_id=? AND drug_code=? AND batch_id=?",
-            (comp_id, drug_code, batch_id),
-        )
-        row = self.cursor.fetchone()
-        if not row or row[0] <= 0:
-            return
-        new_q = max(0, row[0] - qty)
-        self.cursor.execute(
-            "UPDATE inventory SET qty_on_hand=? WHERE compartment_id=? AND drug_code=? AND batch_id=?",
-            (new_q, comp_id, drug_code, batch_id),
-        )
-        self.cursor.execute(
-            "INSERT INTO movement (movement_type, compartment_id, drug_code, batch_id, qty, operator_id, timestamp) VALUES ('somministrazione', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
-            (comp_id, drug_code, batch_id, -qty, self.staff_id),
-        )
+    def remove_inventory(self, drug, batch, drawer_id, number, qty):
+        if self.new_schema:
+            comp_id = self.ensure_compartment(drawer_id, number)
+            self.cursor.execute(
+                "SELECT qty_on_hand FROM inventory WHERE compartment_id=? AND drug_code=? AND batch_id=?",
+                (comp_id, drug, batch),
+            )
+            row = self.cursor.fetchone()
+            if not row or row[0] <= 0:
+                return
+            new_q = max(0, row[0] - qty)
+            self.cursor.execute(
+                "UPDATE inventory SET qty_on_hand=? WHERE compartment_id=? AND drug_code=? AND batch_id=?",
+                (new_q, comp_id, drug, batch),
+            )
+            self.cursor.execute(
+                "INSERT INTO movement (movement_type, compartment_id, drug_code, batch_id, qty, operator_id, timestamp) VALUES ('somministrazione', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                (comp_id, drug, batch, -qty, self.staff_id),
+            )
+        else:
+            self.cursor.execute(
+                "SELECT quantity FROM inventory WHERE drug_id=? AND batch_code=? AND drawer_id=? AND compartment_number=?",
+                (drug, batch, drawer_id, number),
+            )
+            row = self.cursor.fetchone()
+            if not row or row[0] <= 0:
+                return
+            new_q = max(0, row[0] - qty)
+            self.cursor.execute(
+                "UPDATE inventory SET quantity=? WHERE drug_id=? AND batch_code=? AND drawer_id=? AND compartment_number=?",
+                (new_q, drug, batch, drawer_id, number),
+            )
+            self.cursor.execute(
+                "INSERT INTO movement (drug_id, batch_code, drawer_id, compartment_number, change, movement_type, staff_id) VALUES (?, ?, ?, ?, ?, 'dispense', ?)",
+                (drug, batch, drawer_id, number, -qty, self.staff_id),
+            )
 
     def _create_caricamento_tab(self):
         layout = QHBoxLayout()
@@ -373,8 +448,8 @@ class MainWindow(QMainWindow):
             self.farmaci_per_paziente[nome] = farmaci
 
             for f in farmaci:
-                drug_code = self.ensure_drug(f)
-                batch_id = self.ensure_batch(drug_code)
+                drug = self.ensure_drug(f)
+                batch = self.ensure_batch(drug)
 
                 drawer_id = ((scomparto_id - 1) // 6) + 1
                 number = ((scomparto_id - 1) % 6) + 1
@@ -382,13 +457,13 @@ class MainWindow(QMainWindow):
                 scomparto = number
                 scomparto_id += 1
 
-                self.add_inventory(drug_code, batch_id, drawer_id, number, 1)
+                self.add_inventory(drug, batch, drawer_id, number, 1)
 
                 self.allocazioni[f] = {
                     "cassetto": cassetto,
                     "scomparto": scomparto,
-                    "drug_code": drug_code,
-                    "batch_id": batch_id,
+                    "drug": drug,
+                    "batch": batch,
                     "drawer_id": drawer_id,
                     "number": number,
                 }
@@ -469,8 +544,8 @@ class MainWindow(QMainWindow):
         info = self.allocazioni.get(farmaco)
         if info:
             self.remove_inventory(
-                info["drug_code"],
-                info["batch_id"],
+                info["drug"],
+                info["batch"],
                 info["drawer_id"],
                 info["number"],
                 1,
