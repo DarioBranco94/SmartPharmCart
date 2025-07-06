@@ -163,6 +163,24 @@ CREATE TABLE mqtt_outbox (
     ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Aggiorna la tabella inventory ad ogni inserimento in movement
+CREATE OR REPLACE FUNCTION update_inventory_after_movement()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE inventory SET quantity = quantity + NEW.change
+    WHERE id = NEW.inventory_id;
+    IF (SELECT quantity FROM inventory WHERE id = NEW.inventory_id) < 0 THEN
+        RAISE EXCEPTION 'Negative inventory quantity';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER movement_inventory_update
+AFTER INSERT ON movement
+FOR EACH ROW
+EXECUTE FUNCTION update_inventory_after_movement();
+
 
 CREATE TABLE IF NOT EXISTS cart_location (
 
@@ -189,5 +207,3 @@ INSERT INTO compartment (drawer_id, number) VALUES
     (3,1),(3,2),(3,3),(3,4),(3,5),(3,6),
     (4,1),(4,2),(4,3),(4,4),(4,5),(4,6),
     (5,1),(5,2),(5,3),(5,4),(5,5),(5,6);
-
-

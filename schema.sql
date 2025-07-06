@@ -141,6 +141,32 @@ INSERT INTO drawer_state (id, name) VALUES
     (3, 'locked');
 
 -- Create drawers and compartments for cart 1
+
+INSERT INTO drawer (cart_id, number) VALUES
+    (1, 1),(1, 2),(1, 3),(1, 4),(1, 5);
+
+INSERT INTO compartment (drawer_id, number) VALUES
+    (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
+    (2,1),(2,2),(2,3),(2,4),(2,5),(2,6),
+    (3,1),(3,2),(3,3),(3,4),(3,5),(3,6),
+    (4,1),(4,2),(4,3),(4,4),(4,5),(4,6),
+    (5,1),(5,2),(5,3),(5,4),(5,5),(5,6);
+
+-- Aggiorna la tabella inventory ad ogni inserimento in movement
+CREATE TRIGGER movement_inventory_update
+AFTER INSERT ON movement
+BEGIN
+    UPDATE inventory
+    SET quantity = quantity + NEW.change
+    WHERE id = NEW.inventory_id;
+
+    -- Se la quantita' scende sotto zero annulla la transazione
+    SELECT CASE
+        WHEN (SELECT quantity FROM inventory WHERE id = NEW.inventory_id) < 0
+        THEN RAISE(ROLLBACK, 'Negative inventory quantity')
+    END;
+END;
+
 INSERT INTO drawer (cart_id, number, label) VALUES
     (1, 1, 'Drawer 1'),
     (1, 2, 'Drawer 2'),
@@ -154,3 +180,4 @@ INSERT INTO compartment (drawer_id, number, label) VALUES
     (3,1,'C3-1'),(3,2,'C3-2'),(3,3,'C3-3'),(3,4,'C3-4'),(3,5,'C3-5'),(3,6,'C3-6'),
     (4,1,'C4-1'),(4,2,'C4-2'),(4,3,'C4-3'),(4,4,'C4-4'),(4,5,'C4-5'),(4,6,'C4-6'),
     (5,1,'C5-1'),(5,2,'C5-2'),(5,3,'C5-3'),(5,4,'C5-4'),(5,5,'C5-5'),(5,6,'C5-6');
+
