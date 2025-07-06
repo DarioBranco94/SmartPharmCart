@@ -1,5 +1,5 @@
 DROP TABLE IF EXISTS cart_location;
-DROP TABLE IF EXISTS drawer_state;
+DROP TABLE IF EXISTS drawer_state_master;
 DROP TABLE IF EXISTS mqtt_outbox;
 DROP TABLE IF EXISTS movement;
 DROP TABLE IF EXISTS inventory;
@@ -27,7 +27,7 @@ CREATE TABLE cart (
     FOREIGN KEY (ward_id) REFERENCES ward(id)
 );
 
-CREATE TABLE drawer_state (
+CREATE TABLE drawer_state_master (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE
 );
@@ -39,12 +39,13 @@ CREATE TABLE drawer (
     label TEXT,
     state_id INTEGER,
     FOREIGN KEY (cart_id) REFERENCES cart(id),
-    FOREIGN KEY (state_id) REFERENCES drawer_state(id)
+    FOREIGN KEY (state_id) REFERENCES drawer_state_master(id)
 );
 
 CREATE TABLE compartment (
     drawer_id INTEGER NOT NULL,
     number INTEGER NOT NULL,
+    label TEXT,
     PRIMARY KEY (drawer_id, number),
 
     FOREIGN KEY (drawer_id) REFERENCES drawer(id)
@@ -135,7 +136,7 @@ INSERT INTO ward (id, name) VALUES (1, 'Default Ward');
 UPDATE cart SET ward_id = 1 WHERE id = 1;
 INSERT INTO staff (name, username, password, badge) VALUES ('Admin', 'admin', 'admin', '0001');
 
-INSERT INTO drawer_state (id, name) VALUES
+INSERT INTO drawer_state_master (id, name) VALUES
     (1, 'closed'),
     (2, 'open'),
     (3, 'locked');
@@ -145,12 +146,6 @@ INSERT INTO drawer_state (id, name) VALUES
 INSERT INTO drawer (cart_id, number) VALUES
     (1, 1),(1, 2),(1, 3),(1, 4),(1, 5);
 
-INSERT INTO compartment (drawer_id, number) VALUES
-    (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
-    (2,1),(2,2),(2,3),(2,4),(2,5),(2,6),
-    (3,1),(3,2),(3,3),(3,4),(3,5),(3,6),
-    (4,1),(4,2),(4,3),(4,4),(4,5),(4,6),
-    (5,1),(5,2),(5,3),(5,4),(5,5),(5,6);
 
 -- Aggiorna la tabella inventory ad ogni inserimento in movement
 CREATE TRIGGER movement_inventory_update

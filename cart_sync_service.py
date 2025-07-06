@@ -2,54 +2,52 @@ import json
 import os
 import time
 import paho.mqtt.client as mqtt
-import psycopg2
+import sqlite3
 from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_PARAMS = {
-    'host': os.environ.get('DB_HOST', 'db'),
-    'port': os.environ.get('DB_PORT', 5432),
-    'dbname': os.environ.get('DB_NAME', 'cart'),
-    'user': os.environ.get('DB_USER', 'cart'),
-    'password': os.environ.get('DB_PASSWORD', 'cart'),
-}
+DB_PATH = os.environ.get('DB_PATH', 'carrello.db')
 
 CENTRAL_HOST = os.environ.get('CENTRAL_MQTT_HOST', 'central-broker')
 CENTRAL_PORT = int(os.environ.get('CENTRAL_MQTT_PORT', '1883'))
 
 INTERVAL = int(os.environ.get('SYNC_INTERVAL', '15'))
 
-def wait_for_postgres(db_params, retries=10, delay=2):
+def wait_for_sqlite(path, retries=10, delay=2):
     for i in range(retries):
-        try:
-            conn = psycopg2.connect(**db_params)
-            conn.close()
-            print("✅ DB pronto, connessione riuscita.")
-            return
-        except psycopg2.OperationalError as e:
-            print(f"⏳ Tentativo {i+1}/{retries}: DB non pronto ({e})")
-            time.sleep(delay)
+        if os.path.exists(path):
+            try:
+                sqlite3.connect(path).close()
+                print("✅ DB pronto, connessione riuscita.")
+                return
+            except sqlite3.Error as e:
+                print(f"⏳ Tentativo {i+1}/{retries}: DB non pronto ({e})")
+        else:
+            print(f"⏳ Tentativo {i+1}/{retries}: DB non trovato")
+        time.sleep(delay)
     raise Exception("❌ Errore: impossibile connettersi al DB dopo vari tentativi.")
 
 
 def main():
-    wait_for_postgres(DB_PARAMS)
+    wait_for_sqlite(DB_PATH)
 
-    conn = psycopg2.connect(**DB_PARAMS)
-    conn.autocommit = True
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.isolation_level = None
     client = mqtt.Client()
     client.connect(CENTRAL_HOST, CENTRAL_PORT, 60)
     client.loop_start()
 
     try:
         while True:
-            with conn.cursor() as cur:
-                cur.execute('SELECT id, topic, payload FROM mqtt_outbox WHERE sent = 0 ORDER BY id')
-                rows = cur.fetchall()
-                for _id, topic, payload in rows:
-                    client.publish(topic, payload)
-                    cur.execute('UPDATE mqtt_outbox SET sent = 1 WHERE id = %s', (_id,))
+            cur = conn.cursor()
+            cur.execute('SELECT id, topic, payload FROM mqtt_outbox WHERE sent = 0 ORDER BY id')
+            rows = cur.fetchall()
+            for _id, topic, payload in rows:
+                client.publish(topic, payload)
+                cur.execute('UPDATE mqtt_outbox SET sent = 1 WHERE id = ?', (_id,))
+            conn.commit()
+            cur.close()
             time.sleep(INTERVAL)
     finally:
         client.loop_stop()
